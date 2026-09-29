@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>บันทึกเวลาตื่นและกิจกรรม</title>
+    <!-- โหลด LIFF SDK -->
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        body { font-family: 'Kanit', sans-serif; padding: 20px; background-color: #f5f8fa; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        h3 { color: #00B900; margin-top: 0; }
+        label { display: block; margin-bottom: 10px; cursor: pointer; }
+        input[type="checkbox"] { transform: scale(1.2); margin-right: 10px; }
+        .other-input { width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; font-family: 'Kanit', sans-serif; }
+        .btn-submit { background-color: #00B900; color: white; border: none; padding: 12px; width: 100%; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h3>⏰ บันทึกเวลาตื่น</h3>
+        <p>เวลาปัจจุบัน: <span id="currentTime" style="font-weight: bold; font-size: 18px;"></span> น.</p>
+    </div>
+    <div class="card">
+        <h3>✨ วันนี้ตื่นเช้าแล้วได้ทำอะไรบ้าง?</h3>
+        <label><input type="checkbox" name="activity" value="เข้าเรียนทัน"> เข้าเรียนทัน</label>
+        <label><input type="checkbox" name="activity" value="อ่านหนังสือ"> อ่านหนังสือ</label>
+        <label><input type="checkbox" name="activity" value="ออกกำลังกาย"> ออกกำลังกาย</label>
+        <label><input type="checkbox" name="activity" value="รับประทานอาหารเช้า"> รับประทานอาหารเช้า</label>
+        <label><input type="checkbox" name="activity" value="ทำงาน/กิจกรรมส่วนตัว"> ทำงาน/กิจกรรมส่วนตัว</label>
+        <label><input type="checkbox" name="activity" value="รู้สึกสดชื่นและพร้อมเรียน"> รู้สึกสดชื่นและพร้อมเรียน</label>
+        
+        <!-- เพิ่มช่องอื่นๆ สำหรับพิมพ์ข้อความเพิ่มเติม -->
+        <label style="margin-top: 15px;">
+            <input type="checkbox" id="otherCheckbox" onchange="toggleOtherInput()"> อื่นๆ (โปรดระบุ):
+        </label>
+        <input type="text" id="otherActivityText" class="other-input" placeholder="ระบุกิจกรรมอื่นๆ..." disabled>
+    </div>
+    <button class="btn-submit" onclick="submitForm()">บันทึกข้อมูล</button>
+
+    <script>
+        // แสดงเวลาปัจจุบัน
+        document.getElementById('currentTime').innerText = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+
+        // เริ่มต้น LIFF และตรวจสอบการเข้าสู่ระบบ
+        liff.init({ liffId: "2011779736-WQDdBY7E" })
+            .then(() => {
+                if (!liff.isLoggedIn()) {
+                    liff.login();
+                }
+            })
+            .catch((err) => console.error("LIFF Init Error: ", err));
+
+        // เปิด/ปิดช่องกรอกข้อความเมื่อติ๊กเลือก "อื่นๆ"
+        function toggleOtherInput() {
+            const isChecked = document.getElementById('otherCheckbox').checked;
+            const inputField = document.getElementById('otherActivityText');
+            inputField.disabled = !isChecked;
+            if (!isChecked) {
+                inputField.value = '';
+            }
+        }
+
+        async function submitForm() {
+            if (!liff.isLoggedIn()) {
+                alert("กรุณาเข้าสู่ระบบ LINE ก่อนบันทึกข้อมูล");
+                liff.login();
+                return;
+            }
+
+            try {
+                const profile = await liff.getProfile();
+                const userId = profile.userId;
+                const wakeUpTime = document.getElementById('currentTime').innerText;
+                
+                // ดึงค่ากิจกรรมที่ถูกติ๊กจาก Checkbox ปกติ
+                let activities = Array.from(document.querySelectorAll('input[name="activity"]:checked')).map(cb => cb.value);
+                
+                // ตรวจสอบช่อง "อื่นๆ" เพิ่มเติม
+                const isOtherChecked = document.getElementById('otherCheckbox').checked;
+                const otherText = document.getElementById('otherActivityText').value.trim();
+                
+                if (isOtherChecked && otherText !== "") {
+                    activities.push(otherText);
+                }
+                
+                if (activities.length === 0) {
+                    return alert("กรุณาเลือกกิจกรรมหรือระบุกิจกรรมอื่นๆ อย่างน้อย 1 อย่างนะครับ");
+                }
+
+                // ส่งข้อมูลไปที่ Backend ของเรา (Node.js)
+                const response = await fetch('/api/save-record', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'ngrok-skip-browser-warning': 'true' // ข้ามการบล็อกของ ngrok
+                    },
+                    body: JSON.stringify({ userId, wakeUpTime, activities })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert("บันทึกข้อมูลสำเร็จ! ลุยต่อให้ครบ 21 วันนะครับ");
+                    liff.closeWindow(); // ปิดหน้าต่าง LIFF อัตโนมัติ
+                } else {
+                    alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล");
+                }
+            } catch (err) {
+                console.error("Error:", err);
+                alert("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้");
+            }
+        }
+    </script>
+</body>
+</html>
