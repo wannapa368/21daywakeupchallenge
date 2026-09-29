@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ประวัติการเช็คอินย้อนหลัง</title>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        body { font-family: 'Kanit', sans-serif; padding: 20px; background-color: #f5f8fa; color: #333; }
+        .card { background: white; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        h3 { color: #00B900; margin-top: 0; }
+        .history-item { border-bottom: 1px solid #eee; padding: 10px 0; }
+        .history-item:last-child { border-bottom: none; }
+        .time { font-weight: bold; color: #FF5722; }
+    </style>
+</head>
+<body>
+    <h3>📊 ประวัติการตื่นเช้าของคุณ</h3>
+    <div id="historyList" class="card">
+        <p>กำลังโหลดข้อมูล...</p>
+    </div>
+
+    <script>
+        liff.init({ liffId: "2011779736-h9CYungO" })
+            .then(async () => {
+                if (!liff.isLoggedIn()) {
+                    liff.login();
+                } else {
+                    const profile = await liff.getProfile();
+                    fetchHistory(profile.userId);
+                }
+            })
+            .catch(err => console.error("LIFF Init Error:", err));
+
+        async function fetchHistory(userId) {
+            try {
+                const res = await fetch(`/api/user-history/${userId}`, {
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
+                const data = await res.json();
+                const container = document.getElementById('historyList');
+
+                if (data.success && data.checkIns.length > 0) {
+                    container.innerHTML = data.checkIns.reverse().map((item, index) => `
+                        <div class="history-item">
+                            <p><strong>วันที่เช็คอิน:</strong> ${new Date(item.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                            <p>⏰ เวลาตื่น: <span class="time">${item.wakeUpTime} น.</span></p>
+                            <p>✨ กิจกรรม: ${item.activities.join(', ')}</p>
+                        </div>
+                    `).join('');
+                } else {
+                    container.innerHTML = '<p>ยังไม่มีประวัติการเช็คอิน เริ่มต้นภารกิจกันเลย!</p>';
+                }
+            } catch (err) {
+                console.error(err);
+                document.getElementById('historyList').innerHTML = '<p>ไม่สามารถโหลดข้อมูลได้</p>';
+            }
+        }
+    </script>
+</body>
+</html>

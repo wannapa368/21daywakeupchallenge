@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ตารางชาเลนจ์ 21 วัน</title>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        body { font-family: 'Kanit', sans-serif; padding: 20px; background-color: #f5f8fa; text-align: center; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        h3 { color: #00B900; }
+        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 20px; }
+        .day-box { background: #e0e0e0; padding: 15px; border-radius: 8px; font-weight: bold; color: #666; font-size: 16px; }
+        .day-box.completed { background: #00B900; color: white; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h3>🔥 21-Day Wake Up Challenge</h3>
+        <p id="statusText">กำลังโหลดข้อมูล...</p>
+        <div class="grid" id="challengeGrid"></div>
+    </div>
+
+    <script>
+        liff.init({ liffId: "2011779736-IIuoK5On" })
+            .then(async () => {
+                if (!liff.isLoggedIn()) {
+                    liff.login();
+                } else {
+                    const profile = await liff.getProfile();
+                    fetchChallengeProgress(profile.userId);
+                }
+            })
+            .catch(err => console.error("LIFF Init Error:", err));
+
+        async function fetchChallengeProgress(userId) {
+            try {
+                const res = await fetch(`/api/user-history/${userId}`, {
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    const totalChecked = data.checkIns.length;
+                    const percent = Math.min(Math.round((totalChecked / 21) * 100), 100);
+                    document.getElementById('statusText').innerText = `ทำสำเร็จแล้ว ${totalChecked} / 21 วัน (${percent}%)`;
+
+                    const gridContainer = document.getElementById('challengeGrid');
+                    let gridHTML = '';
+                    for (let i = 1; i <= 21; i++) {
+                        const isDone = i <= totalChecked ? 'completed' : '';
+                        gridHTML += `<div class="day-box ${isDone}">Day ${i}</div>`;
+                    }
+                    gridContainer.innerHTML = gridHTML;
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+    </script>
+</body>
+</html>
