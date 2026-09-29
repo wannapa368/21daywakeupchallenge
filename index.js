@@ -1,18 +1,42 @@
 require('dotenv').config();
 const express = require('express');
 const line = require('@line/bot-sdk');
-const mongoose = require('mongoose');
+const sqlite3 = require('sqlite3');
+const { open } = require('sqlite');
+const path = require('path');
 
-// นำเข้าโมเดลและฟังก์ชันที่แยกไว้
-const User = require('./models/User');
 const { createWakeUpFlexMessage } = require('./utils/flexMessage');
 
-// เชื่อมต่อ MongoDB
-mongoose.connect(process.env.MONGODB_URI)
-    .then(() => console.log('Connected to MongoDB successfully!'))
-    .catch(err => console.error('MongoDB connection error:', err));
+let db;
 
-// การตั้งค่า LINE Client และ Middleware
+// ฟังก์ชันเชื่อมต่อ SQLite และสร้างตาราง
+async function initDB() {
+    db = await open({
+        filename: path.join(__dirname, 'database.sqlite'),
+        driver: sqlite3.Database
+    });
+
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS users (
+            userId TEXT PRIMARY KEY,
+            startDate TEXT,
+            isCompleted INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS check_ins (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            userId TEXT,
+            date TEXT,
+            wakeUpTime TEXT,
+            activities TEXT,
+            FOREIGN KEY (userId) REFERENCES users(userId)
+        );
+    `);
+    console.log('Connected to SQLite database successfully!');
+}
+
+initDB().catch(err => console.error('SQLite connection error:', err));
+
 const middlewareConfig = {
     channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
     channelSecret: process.env.LINE_CHANNEL_SECRET,
@@ -23,14 +47,11 @@ const clientConfig = {
 };
 
 const client = new line.messagingApi.MessagingApiClient(clientConfig);
-
 const app = express();
 
-// Middleware
 app.use(express.json());
 app.use(express.static('public'));
 
-// Webhook สำหรับดักรับ Event จาก LINE Bot
 app.post('/webhook', line.middleware(middlewareConfig), (req, res) => {
     Promise
         .all(req.body.events.map(handleEvent))
@@ -41,26 +62,30 @@ app.post('/webhook', line.middleware(middlewareConfig), (req, res) => {
         });
 });
 
-// API สำหรับรับข้อมูลการเช็คอินจาก LIFF Frontend (liff.html)
+// API บันทึกเวลาตื่น
 app.post('/api/save-record', async (req, res) => {
     const { userId, wakeUpTime, activities } = req.body;
     try {
-        let user = await User.findOne({ userId: userId });
+        let user = await db.get(`SELECT * FROM users WHERE userId = ?`, [userId]);
+        const nowStr = new Date().toISOString();
+
         if (!user) {
-            user = new User({ userId: userId, checkIns: [] });
+            await db.run(`INSERT INTO users (userId, startDate, isCompleted) VALUES (?, ?, ?)`, 
+                [userId, nowStr, 0]);
         }
-        
-        user.checkIns.push({ wakeUpTime, activities });
-        const dayCount = user.checkIns.length;
+
+        // บันทึกประวัติการเช็คอิน (แปลง activities array เป็น JSON string)
+        await db.run(`INSERT INTO check_ins (userId, date, wakeUpTime, activities) VALUES (?, ?, ?, ?)`,
+            [userId, nowStr, wakeUpTime, JSON.stringify(activities)]);
+
+        const checkIns = await db.all(`SELECT * FROM check_ins WHERE userId = ?`, [userId]);
+        const dayCount = checkIns.length;
         const percent = Math.min(Math.round((dayCount / 21) * 100), 100);
 
         if (dayCount >= 21) {
-            user.isCompleted = true;
+            await db.run(`UPDATE users SET isCompleted = 1 WHERE userId = ?`, [userId]);
         }
 
-        await user.save();
-
-        // สร้าง Flex Message จากโมดูลย่อย
         const flexMessage = createWakeUpFlexMessage(dayCount, wakeUpTime, activities);
 
         await client.pushMessage({
@@ -75,22 +100,30 @@ app.post('/api/save-record', async (req, res) => {
     }
 });
 
-// API สำหรับดึงประวัติและข้อมูลชาเลนจ์ของผู้ใช้ (รองรับ history.html และ challenges.html)
+// API ดึงประวัติผู้ใช้
 app.get('/api/user-history/:userId', async (req, res) => {
     try {
         const userId = req.params.userId;
-        const user = await User.findOne({ userId: userId });
+        const user = await db.get(`SELECT * FROM users WHERE userId = ?`, [userId]);
+        
         if (!user) {
             return res.json({ success: true, checkIns: [], startDate: new Date() });
         }
-        res.json({ success: true, checkIns: user.checkIns, startDate: user.startDate });
+
+        const rawCheckIns = await db.all(`SELECT * FROM check_ins WHERE userId = ?`, [userId]);
+        const checkIns = rawCheckIns.map(item => ({
+            date: item.date,
+            wakeUpTime: item.wakeUpTime,
+            activities: JSON.parse(item.activities)
+        }));
+
+        res.json({ success: true, checkIns, startDate: user.startDate });
     } catch (error) {
         console.error('Get history error:', error);
         res.status(500).json({ success: false, error: 'Database error' });
     }
 });
 
-// ฟังก์ชันจัดการข้อความแชท
 async function handleEvent(event) {
     if (event.type !== 'message' || event.message.type !== 'text') {
         return Promise.resolve(null);
@@ -101,23 +134,26 @@ async function handleEvent(event) {
     let replyMessage = '';
 
     try {
-        let user = await User.findOne({ userId: userId });
+        let user = await db.get(`SELECT * FROM users WHERE userId = ?`, [userId]);
 
         if (userText === 'เริ่มชาเลนจ์') {
             if (!user) {
-                user = new User({ userId: userId, checkIns: [] });
-                await user.save();
+                const nowStr = new Date().toISOString();
+                await db.run(`INSERT INTO users (userId, startDate, isCompleted) VALUES (?, ?, ?)`, 
+                    [userId, nowStr, 0]);
                 replyMessage = "ยินดีต้อนรับสู่ 21 Day Wake Up Challenge! ข้อมูลของคุณถูกลงทะเบียนแล้ว เริ่มบันทึกเวลาตื่นได้เลยครับ";
             } else {
-                const count = user.checkIns.length;
+                const checkIns = await db.all(`SELECT * FROM check_ins WHERE userId = ?`, [userId]);
+                const count = checkIns.length;
                 const pct = Math.min(Math.round((count / 21) * 100), 100);
                 replyMessage = `คุณได้ลงทะเบียนเข้าร่วมชาเลนจ์ไว้แล้วครับ ปัจจุบันทำไปแล้ว ${count}/21 วัน (${pct}%)`;
             }
         } else if (userText === 'สถิติ') {
-            if (!user || user.checkIns.length === 0) {
+            const checkIns = user ? await db.all(`SELECT * FROM check_ins WHERE userId = ?`, [userId]) : [];
+            if (!user || checkIns.length === 0) {
                 replyMessage = "คุณยังไม่มีประวัติการเช็คอิน เริ่มต้นภารกิจได้โดยการบันทึกเวลาตื่นนะครับ";
             } else {
-                const count = user.checkIns.length;
+                const count = checkIns.length;
                 const pct = Math.min(Math.round((count / 21) * 100), 100);
                 replyMessage = `📊 สถิติความก้าวหน้าของคุณ:\n- ทำสำเร็จ: Day ${count} / 21 วัน\n- คิดเป็น: ${pct}%\n\nสู้ๆ ครับ ใกล้ความจริงแล้ว!`;
             }
@@ -126,7 +162,7 @@ async function handleEvent(event) {
         }
     } catch (error) {
         console.error('Database query error:', error);
-        replyMessage = 'ขออภัยครับ เกิดข้อผิดพลาดในระบบฐานข้อมูล โปรดลองใหม่อีกครั้ง';
+        replyMessage = 'ขออภัยครับ เกิดข้อผิดพลาดในระบบ โปรดลองใหม่อีกครั้ง';
     }
 
     return client.replyMessage({

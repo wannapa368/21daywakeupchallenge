@@ -14,6 +14,8 @@
     "@line/bot-sdk": "^11.2.0",
     "dotenv": "^18.0.4",
     "express": "^5.2.1",
-    "mongoose": "^9.10.2"
+    "mongoose": "^9.10.2",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^6.0.1"
   }
 }
