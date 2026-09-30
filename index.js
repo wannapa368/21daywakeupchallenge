@@ -8,24 +8,33 @@ process.on('unhandledRejection', (reason, promise) => {
 require('dotenv').config();
 const express = require('express');
 const line = require('@line/bot-sdk');
-const fs = require('fs');
-const path = require('path');
+const mongoose = require('mongoose');
 
 const { createWakeUpFlexMessage } = require('./utils/flexMessage');
 
-const DB_FILE = path.join(__dirname, 'database.json');
+// เชื่อมต่อ MongoDB Atlas
+mongoose.connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+}).then(() => {
+    console.log('Connected to MongoDB successfully');
+}).catch(err => {
+    console.error('MongoDB connection error:', err);
+});
 
-function readDB() {
-    if (!fs.existsSync(DB_FILE)) {
-        fs.writeFileSync(DB_FILE, JSON.stringify({ users: [] }, null, 2));
-    }
-    const data = fs.readFileSync(DB_FILE, 'utf8');
-    return JSON.parse(data);
-}
+// กำหนด Schema ของผู้ใช้งาน
+const userSchema = new mongoose.Schema({
+    userId: { type: String, required: true, unique: true },
+    startDate: { type: Date, default: Date.now },
+    isCompleted: { type: Boolean, default: false },
+    checkIns: [{
+        date: { type: Date, required: true },
+        wakeUpTime: String,
+        activities: [String]
+    }]
+});
 
-function writeDB(data) {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
-}
+const User = mongoose.model('User', userSchema);
 
 const config = {
     channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
@@ -51,15 +60,16 @@ app.post('/webhook', line.middleware(config), (req, res) => {
 app.post('/api/save-record', async (req, res) => {
     const { userId, wakeUpTime, activities } = req.body;
     try {
-        const db = readDB();
-        let user = db.users.find(u => u.userId === userId);
-
-        // ดึงวันที่ปัจจุบันตามเวลาประเทศไทย (YYYY-MM-DD)
+        let user = await User.findOne({ userId });
         const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
 
         if (!user) {
-            user = { userId: userId, startDate: new Date(), checkIns: [], isCompleted: false };
-            db.users.push(user);
+            user = new User({
+                userId,
+                startDate: new Date(),
+                checkIns: [],
+                isCompleted: false
+            });
         } else {
             // เช็คว่าวันนี้เคยบันทึกไปแล้วหรือยัง (เทียบด้วยเวลาไทย)
             const alreadyCheckedIn = user.checkIns.some(checkIn => {
@@ -88,10 +98,9 @@ app.post('/api/save-record', async (req, res) => {
             user.isCompleted = true;
         }
 
-        writeDB(db);
+        await user.save();
 
         const flexMessage = createWakeUpFlexMessage(dayCount, wakeUpTime, activities);
-
         await client.pushMessage(userId, flexMessage);
 
         res.json({ success: true, dayCount, percent });
@@ -104,8 +113,7 @@ app.post('/api/save-record', async (req, res) => {
 app.get('/api/user-history/:userId', async (req, res) => {
     try {
         const userId = req.params.userId;
-        const db = readDB();
-        const user = db.users.find(u => u.userId === userId);
+        const user = await User.findOne({ userId });
 
         if (!user) {
             return res.json({ success: true, checkIns: [], startDate: new Date() });
@@ -127,14 +135,12 @@ async function handleEvent(event) {
     let replyMessage = '';
 
     try {
-        const db = readDB();
-        let user = db.users.find(u => u.userId === userId);
+        let user = await User.findOne({ userId });
 
         if (userText === 'เริ่มชาเลนจ์') {
             if (!user) {
-                user = { userId: userId, startDate: new Date(), checkIns: [], isCompleted: false };
-                db.users.push(user);
-                writeDB(db);
+                user = new User({ userId, startDate: new Date(), checkIns: [], isCompleted: false });
+                await user.save();
                 replyMessage = "ยินดีต้อนรับสู่ 21 Day Wake Up Challenge! ข้อมูลของคุณถูกลงทะเบียนแล้ว เริ่มบันทึกเวลาตื่นได้เลยครับ";
             } else {
                 const count = user.checkIns.length;
