@@ -67,9 +67,9 @@ app.post('/api/save-record', async (req, res) => {
             });
 
             if (alreadyCheckedIn) {
-                return res.status(400).json({ 
+                return res.status(200).json({ 
                     success: false, 
-                    error: 'คุณได้บันทึกเวลาตื่นของวันนี้ไปเรียบร้อยแล้วครับ สามารถบันทึกใหม่อีกครั้งได้ในวันพรุ่งนี้!' 
+                    error: 'คุณได้บันทึกเวลาตื่นของวันนี้ไปเรียบร้อยแล้วครับ ไว้บันทึกใหม่อีกครั้งพรุ่งนี้นะครับ!' 
                 });
             }
         }
