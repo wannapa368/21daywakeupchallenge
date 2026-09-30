@@ -54,15 +54,16 @@ app.post('/api/save-record', async (req, res) => {
         const db = readDB();
         let user = db.users.find(u => u.userId === userId);
 
-        const todayStr = new Date().toISOString().split('T')[0]; // ดึงวันที่ปัจจุบัน (YYYY-MM-DD)
+        // ดึงวันที่ปัจจุบันตามเวลาประเทศไทย (YYYY-MM-DD)
+        const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
 
         if (!user) {
             user = { userId: userId, startDate: new Date(), checkIns: [], isCompleted: false };
             db.users.push(user);
         } else {
-            // เช็คว่าวันนี้เคยบันทึกไปแล้วหรือยัง
+            // เช็คว่าวันนี้เคยบันทึกไปแล้วหรือยัง (เทียบด้วยเวลาไทย)
             const alreadyCheckedIn = user.checkIns.some(checkIn => {
-                const checkInDateStr = new Date(checkIn.date).toISOString().split('T')[0];
+                const checkInDateStr = new Date(checkIn.date).toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
                 return checkInDateStr === todayStr;
             });
 
