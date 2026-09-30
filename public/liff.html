@@ -99,10 +99,11 @@
 
                 const data = await response.json();
                 if (data.success) {
-                    alert(`บันทึกข้อมูลสำเร็จ! (Day ${data.dayCount} - ${data.percent}%)`);
+                    alert(`บันทึกข้อมูลสำเร็จ! (Day ${data.dayCount} ${data.percent}%)`);
                     liff.closeWindow(); // ปิดหน้าต่าง LIFF อัตโนมัติ
                 } else {
-                    alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล");
+                    // แสดงข้อความตามที่ Server ส่งกลับมา (เช่น แจ้งเตือนว่าบันทึกซ้ำในวันนี้แล้ว)
+                    alert(data.error || "เกิดข้อผิดพลาดในการบันทึกข้อมูล");
                 }
             } catch (err) {
                 console.error("Error:", err);
