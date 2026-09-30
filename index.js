@@ -1,41 +1,24 @@
 require('dotenv').config();
 const express = require('express');
 const line = require('@line/bot-sdk');
-const sqlite3 = require('sqlite3');
-const { open } = require('sqlite');
+const fs = require('fs');
 const path = require('path');
 
 const { createWakeUpFlexMessage } = require('./utils/flexMessage');
 
-let db;
+const DB_FILE = path.join(__dirname, 'database.json');
 
-// ฟังก์ชันเชื่อมต่อ SQLite และสร้างตาราง
-async function initDB() {
-    db = await open({
-        filename: path.join(__dirname, 'database.sqlite'),
-        driver: sqlite3.Database
-    });
-
-    await db.exec(`
-        CREATE TABLE IF NOT EXISTS users (
-            userId TEXT PRIMARY KEY,
-            startDate TEXT,
-            isCompleted INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS check_ins (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            userId TEXT,
-            date TEXT,
-            wakeUpTime TEXT,
-            activities TEXT,
-            FOREIGN KEY (userId) REFERENCES users(userId)
-        );
-    `);
-    console.log('Connected to SQLite database successfully!');
+function readDB() {
+    if (!fs.existsSync(DB_FILE)) {
+        fs.writeFileSync(DB_FILE, JSON.stringify({ users: [] }, null, 2));
+    }
+    const data = fs.readFileSync(DB_FILE, 'utf8');
+    return JSON.parse(data);
 }
 
-initDB().catch(err => console.error('SQLite connection error:', err));
+function writeDB(data) {
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
+}
 
 const middlewareConfig = {
     channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
@@ -62,29 +45,31 @@ app.post('/webhook', line.middleware(middlewareConfig), (req, res) => {
         });
 });
 
-// API บันทึกเวลาตื่น
 app.post('/api/save-record', async (req, res) => {
     const { userId, wakeUpTime, activities } = req.body;
     try {
-        let user = await db.get(`SELECT * FROM users WHERE userId = ?`, [userId]);
-        const nowStr = new Date().toISOString();
+        const db = readDB();
+        let user = db.users.find(u => u.userId === userId);
 
         if (!user) {
-            await db.run(`INSERT INTO users (userId, startDate, isCompleted) VALUES (?, ?, ?)`, 
-                [userId, nowStr, 0]);
+            user = { userId: userId, startDate: new Date(), checkIns: [], isCompleted: false };
+            db.users.push(user);
         }
 
-        // บันทึกประวัติการเช็คอิน (แปลง activities array เป็น JSON string)
-        await db.run(`INSERT INTO check_ins (userId, date, wakeUpTime, activities) VALUES (?, ?, ?, ?)`,
-            [userId, nowStr, wakeUpTime, JSON.stringify(activities)]);
+        user.checkIns.push({
+            date: new Date(),
+            wakeUpTime,
+            activities
+        });
 
-        const checkIns = await db.all(`SELECT * FROM check_ins WHERE userId = ?`, [userId]);
-        const dayCount = checkIns.length;
+        const dayCount = user.checkIns.length;
         const percent = Math.min(Math.round((dayCount / 21) * 100), 100);
 
         if (dayCount >= 21) {
-            await db.run(`UPDATE users SET isCompleted = 1 WHERE userId = ?`, [userId]);
+            user.isCompleted = true;
         }
+
+        writeDB(db);
 
         const flexMessage = createWakeUpFlexMessage(dayCount, wakeUpTime, activities);
 
@@ -100,24 +85,16 @@ app.post('/api/save-record', async (req, res) => {
     }
 });
 
-// API ดึงประวัติผู้ใช้
 app.get('/api/user-history/:userId', async (req, res) => {
     try {
         const userId = req.params.userId;
-        const user = await db.get(`SELECT * FROM users WHERE userId = ?`, [userId]);
-        
+        const db = readDB();
+        const user = db.users.find(u => u.userId === userId);
+
         if (!user) {
             return res.json({ success: true, checkIns: [], startDate: new Date() });
         }
-
-        const rawCheckIns = await db.all(`SELECT * FROM check_ins WHERE userId = ?`, [userId]);
-        const checkIns = rawCheckIns.map(item => ({
-            date: item.date,
-            wakeUpTime: item.wakeUpTime,
-            activities: JSON.parse(item.activities)
-        }));
-
-        res.json({ success: true, checkIns, startDate: user.startDate });
+        res.json({ success: true, checkIns: user.checkIns, startDate: user.startDate });
     } catch (error) {
         console.error('Get history error:', error);
         res.status(500).json({ success: false, error: 'Database error' });
@@ -134,26 +111,25 @@ async function handleEvent(event) {
     let replyMessage = '';
 
     try {
-        let user = await db.get(`SELECT * FROM users WHERE userId = ?`, [userId]);
+        const db = readDB();
+        let user = db.users.find(u => u.userId === userId);
 
         if (userText === 'เริ่มชาเลนจ์') {
             if (!user) {
-                const nowStr = new Date().toISOString();
-                await db.run(`INSERT INTO users (userId, startDate, isCompleted) VALUES (?, ?, ?)`, 
-                    [userId, nowStr, 0]);
+                user = { userId: userId, startDate: new Date(), checkIns: [], isCompleted: false };
+                db.users.push(user);
+                writeDB(db);
                 replyMessage = "ยินดีต้อนรับสู่ 21 Day Wake Up Challenge! ข้อมูลของคุณถูกลงทะเบียนแล้ว เริ่มบันทึกเวลาตื่นได้เลยครับ";
             } else {
-                const checkIns = await db.all(`SELECT * FROM check_ins WHERE userId = ?`, [userId]);
-                const count = checkIns.length;
+                const count = user.checkIns.length;
                 const pct = Math.min(Math.round((count / 21) * 100), 100);
                 replyMessage = `คุณได้ลงทะเบียนเข้าร่วมชาเลนจ์ไว้แล้วครับ ปัจจุบันทำไปแล้ว ${count}/21 วัน (${pct}%)`;
             }
         } else if (userText === 'สถิติ') {
-            const checkIns = user ? await db.all(`SELECT * FROM check_ins WHERE userId = ?`, [userId]) : [];
-            if (!user || checkIns.length === 0) {
+            if (!user || user.checkIns.length === 0) {
                 replyMessage = "คุณยังไม่มีประวัติการเช็คอิน เริ่มต้นภารกิจได้โดยการบันทึกเวลาตื่นนะครับ";
             } else {
-                const count = checkIns.length;
+                const count = user.checkIns.length;
                 const pct = Math.min(Math.round((count / 21) * 100), 100);
                 replyMessage = `📊 สถิติความก้าวหน้าของคุณ:\n- ทำสำเร็จ: Day ${count} / 21 วัน\n- คิดเป็น: ${pct}%\n\nสู้ๆ ครับ ใกล้ความจริงแล้ว!`;
             }
