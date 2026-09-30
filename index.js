@@ -54,9 +54,24 @@ app.post('/api/save-record', async (req, res) => {
         const db = readDB();
         let user = db.users.find(u => u.userId === userId);
 
+        const todayStr = new Date().toISOString().split('T')[0]; // ดึงวันที่ปัจจุบัน (YYYY-MM-DD)
+
         if (!user) {
             user = { userId: userId, startDate: new Date(), checkIns: [], isCompleted: false };
             db.users.push(user);
+        } else {
+            // เช็คว่าวันนี้เคยบันทึกไปแล้วหรือยัง
+            const alreadyCheckedIn = user.checkIns.some(checkIn => {
+                const checkInDateStr = new Date(checkIn.date).toISOString().split('T')[0];
+                return checkInDateStr === todayStr;
+            });
+
+            if (alreadyCheckedIn) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'คุณได้บันทึกเวลาตื่นของวันนี้ไปเรียบร้อยแล้วครับ สามารถบันทึกใหม่อีกครั้งได้ในวันพรุ่งนี้!' 
+                });
+            }
         }
 
         user.checkIns.push({
