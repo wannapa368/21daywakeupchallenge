@@ -12,11 +12,9 @@ const mongoose = require('mongoose');
 
 const { createWakeUpFlexMessage } = require('./utils/flexMessage');
 
-// เชื่อมต่อ MongoDB Atlas
-mongoose.connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-}).then(() => {
+// เชื่อมต่อ MongoDB Atlas (ปรับปรุงใหม่ ตัด option ที่ไม่รองรับออก)
+mongoose.connect(process.env.MONGO_URI)
+.then(() => {
     console.log('Connected to MongoDB successfully');
 }).catch(err => {
     console.error('MongoDB connection error:', err);
