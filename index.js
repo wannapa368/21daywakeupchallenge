@@ -27,22 +27,18 @@ function writeDB(data) {
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
 }
 
-const middlewareConfig = {
+const config = {
     channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
     channelSecret: process.env.LINE_CHANNEL_SECRET,
 };
 
-const clientConfig = {
-    channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN
-};
-
-const client = new line.messagingApi.MessagingApiClient(clientConfig);
+const client = new line.Client(config);
 const app = express();
 
 app.use(express.json());
 app.use(express.static('public'));
 
-app.post('/webhook', line.middleware(middlewareConfig), (req, res) => {
+app.post('/webhook', line.middleware(config), (req, res) => {
     Promise
         .all(req.body.events.map(handleEvent))
         .then((result) => res.json(result))
@@ -80,10 +76,7 @@ app.post('/api/save-record', async (req, res) => {
 
         const flexMessage = createWakeUpFlexMessage(dayCount, wakeUpTime, activities);
 
-        await client.pushMessage({
-            to: userId,
-            messages: [flexMessage]
-        });
+        await client.pushMessage(userId, flexMessage);
 
         res.json({ success: true, dayCount, percent });
     } catch (error) {
@@ -148,14 +141,9 @@ async function handleEvent(event) {
         replyMessage = 'ขออภัยครับ เกิดข้อผิดพลาดในระบบ โปรดลองใหม่อีกครั้ง';
     }
 
-    return client.replyMessage({
-        replyToken: event.replyToken,
-        messages: [
-            {
-                type: 'text',
-                text: replyMessage
-            }
-        ]
+    return client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: replyMessage
     });
 }
 
